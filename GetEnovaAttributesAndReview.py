@@ -10,16 +10,18 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 def analyze_energiattest(attest_tekst):
     """
     Analyze the extract of this Energy Certificate using structured output.
-    Returns a dictionary with 'Innmeldt_av' and 'Antall_registrerte_enheter' keys.
+    Returns a dictionary with 'Innmeldt_av', 'Antall_registrerte_enheter', 'Positive_ting' and 'Forbedringspotensiale' keys.
     """
     prompt = f"""
-    Jeg ønsker at du leser fra denne attesten.
+    Jeg ønsker at du leser fra denne energiattesten og gir meg følgende informasjon.
 
     Attest tekst: {attest_tekst}
 
     Svaret skal være på dette formatet:
     Innmeldt_av: navn på den som hart laget rapporten firma eller person eller begge deler
     Antall_registrerte_enheter: antall enheter attesten gjelder som et tall
+    Positive_ting: kort oppsummering av positive aspekter ved energieffektiviteten til bygget/enheten
+    Forbedringspotensiale: kort oppsummering av områder som kan forbedres for bedre energieffektivitet
     """
 
     response = client.chat.completions.create(
@@ -30,12 +32,28 @@ def analyze_energiattest(attest_tekst):
 
     # Parse the response
     content = response.choices[0].message.content
-    lines = content.strip().split('Antall_registrerte_enheter:')
+    lines = content.strip().split('\n')
     
-    result = {
-        "Innmeldt_av": lines[0].replace("Innmeldt_av:", "").strip(),
-        "Antall_registrerte_enheter": lines[1]
-    }
+    result = {}
+    current_key = None
+    
+    for line in lines:
+        line = line.strip()
+        if line.startswith('Innmeldt_av:'):
+            current_key = 'Innmeldt_av'
+            result[current_key] = line.replace('Innmeldt_av:', '').strip()
+        elif line.startswith('Antall_registrerte_enheter:'):
+            current_key = 'Antall_registrerte_enheter'
+            result[current_key] = line.replace('Antall_registrerte_enheter:', '').strip()
+        elif line.startswith('Positive_ting:'):
+            current_key = 'Positive_ting'
+            result[current_key] = line.replace('Positive_ting:', '').strip()
+        elif line.startswith('Forbedringspotensiale:'):
+            current_key = 'Forbedringspotensiale'
+            result[current_key] = line.replace('Forbedringspotensiale:', '').strip()
+        elif current_key and line:
+            # Continue adding to current key if line doesn't start with a new key
+            result[current_key] += ' ' + line
     
     return result
 
@@ -75,9 +93,11 @@ def main():
         merkenummer = row['merkenummer']
         
         result = analyze_energiattest(attest_tekst)
-        print(f"\nEnergiAttest {merkenummer}:")
+        print(f"\nMerke: {merkenummer}:")
         print(f"Utførende: {result['Innmeldt_av']}")
         print(f"Antall enheter: {result['Antall_registrerte_enheter']}")
+        print(f"Positive aspekter: {result['Positive_ting']}")
+        print(f"Forbedringspotensiale: {result['Forbedringspotensiale']}")
 
 if __name__ == "__main__":
     main()
