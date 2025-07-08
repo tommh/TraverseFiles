@@ -4,9 +4,74 @@ import os
 import pyodbc
 import pandas as pd
 import requests
+from datetime import datetime
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def save_analysis_to_db(pdfid, merkenummer, adresse, latitude, longitude, energikarakter, oppvarmingskarakter, analysis_result):
+    """
+    Save analysis results to database
+    """
+    conn_str = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        "SERVER=MSI;"
+        "DATABASE=Enova;"
+        "Trusted_Connection=yes;"
+    )
+    
+    # Check if record already exists
+    check_sql = "SELECT COUNT(*) FROM [ev_enova].[EnovaApi_Energiattest_Analysis] WHERE pdfid = ?"
+    
+    # Insert new record
+    insert_sql = """
+    INSERT INTO [ev_enova].[EnovaApi_Energiattest_Analysis] 
+    (pdfid, merkenummer, adresse, latitude, longitude, energikarakter, oppvarmingskarakter, 
+     innmeldt_av, antall_registrerte_enheter, positive_ting, forbedringspotensiale, updated_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+    """
+    
+    # Update existing record
+    update_sql = """
+    UPDATE [ev_enova].[EnovaApi_Energiattest_Analysis] 
+    SET merkenummer = ?, adresse = ?, latitude = ?, longitude = ?, 
+        energikarakter = ?, oppvarmingskarakter = ?, innmeldt_av = ?, 
+        antall_registrerte_enheter = ?, positive_ting = ?, forbedringspotensiale = ?, 
+        updated_date = GETDATE()
+    WHERE pdfid = ?
+    """
+    
+    try:
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+        
+        # Check if record exists
+        cursor.execute(check_sql, (pdfid,))
+        exists = cursor.fetchone()[0] > 0
+        
+        if exists:
+            # Update existing record
+            cursor.execute(update_sql, (
+                merkenummer, adresse, latitude, longitude, energikarakter, oppvarmingskarakter,
+                analysis_result.get('Innmeldt_av', ''), analysis_result.get('Antall_registrerte_enheter', ''),
+                analysis_result.get('Positive_ting', ''), analysis_result.get('Forbedringspotensiale', ''),
+                pdfid
+            ))
+            print(f"Updated analysis for pdfid {pdfid}")
+        else:
+            # Insert new record
+            cursor.execute(insert_sql, (
+                pdfid, merkenummer, adresse, latitude, longitude, energikarakter, oppvarmingskarakter,
+                analysis_result.get('Innmeldt_av', ''), analysis_result.get('Antall_registrerte_enheter', ''),
+                analysis_result.get('Positive_ting', ''), analysis_result.get('Forbedringspotensiale', '')
+            ))
+            print(f"Inserted new analysis for pdfid {pdfid}")
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        print(f"Error saving to database: {e}")
 
 def get_coordinates(address, api_key):
     """
@@ -126,8 +191,8 @@ def get_energiattest_from_db(top_rows=3):
         df = pd.read_sql(query, conn)
         conn.close()
         
-        # Return all relevant columns including the new Adresse column
-        return df[['extracted_text', 'merkenummer', 'energikarakter', 'oppvarmingskarakter', 'adresse']].dropna()
+        # Return all relevant columns including pdfid and adresse
+        return df[['pdfid', 'extracted_text', 'merkenummer', 'energikarakter', 'oppvarmingskarakter', 'adresse']].dropna()
         
     except Exception as e:
         print(f"Error: {e}")
@@ -145,6 +210,7 @@ def main():
     
     # Test each energiattest
     for index, row in attest_df.iterrows():
+        pdfid = row['pdfid']
         attest_tekst = row['extracted_text']
         merkenummer = row['merkenummer']
         energikarakter = row['energikarakter']
@@ -152,15 +218,12 @@ def main():
         adresse = row['adresse']
         
         # Get coordinates for the address
-        #print(f"\nGeocoding address: {adresse}")
         coordinates = get_coordinates(adresse, google_api_key)
         
         if coordinates:
             latitude, longitude = coordinates
-            #print(f"Coordinates: {latitude}, {longitude}")
         else:
             latitude, longitude = None, None
-            #print("Could not get coordinates for this address")
         
         # Analyze with all metadata including coordinates
         result = analyze_energiattest(
@@ -171,7 +234,14 @@ def main():
             longitude
         )
         
-        print(f"\nEnergiAttest {merkenummer}:")
+        # Save to database
+        save_analysis_to_db(
+            pdfid, merkenummer, adresse, latitude, longitude, 
+            energikarakter, oppvarmingskarakter, result
+        )
+        
+        # Print results
+        print(f"\nEnergiAttest {merkenummer} (pdfid: {pdfid}):")
         print(f"Adresse: {adresse}")
         if latitude and longitude:
             print(f"Koordinater: {latitude}, {longitude}")
