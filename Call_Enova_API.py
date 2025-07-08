@@ -42,7 +42,7 @@ url = "https://api.data.enova.no/ems/offentlige-data/v1/Energiattest"
 headers = {
     "Content-Type": "application/json",
     "Cache-Control": "no-cache",
-    "x-api-key": "f36a1754f10f47b487892998d48c47ff"
+    "x-api-key": ""
 }
 
 # Rate limiting configuration
